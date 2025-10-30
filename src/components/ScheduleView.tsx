@@ -30,6 +30,7 @@ export function ScheduleView() {
   const [isAssignmentDialogOpen, setIsAssignmentDialogOpen] = useState(false)
   const [isTimeOffDialogOpen, setIsTimeOffDialogOpen] = useState(false)
   const [selectedDeveloper, setSelectedDeveloper] = useState<Developer | null>(null)
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
   // Load all data
   useEffect(() => {
@@ -61,8 +62,9 @@ export function ScheduleView() {
     setCurrentDate(new Date())
   }
 
-  const handleAddAssignment = (developer?: Developer) => {
+  const handleAddAssignment = (developer?: Developer, date?: string) => {
     setSelectedDeveloper(developer || null)
+    setSelectedDate(date || null)
     setIsAssignmentDialogOpen(true)
   }
 
@@ -164,6 +166,7 @@ export function ScheduleView() {
         developers={developers}
         projects={projects}
         selectedDeveloper={selectedDeveloper}
+        selectedDate={selectedDate}
         onSuccess={loadData}
       />
 

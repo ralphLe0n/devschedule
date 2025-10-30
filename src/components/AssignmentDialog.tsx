@@ -23,6 +23,7 @@ interface AssignmentDialogProps {
   developers: Developer[]
   projects: Project[]
   selectedDeveloper?: Developer | null
+  selectedDate?: string | null
   onSuccess: () => void
 }
 
@@ -32,6 +33,7 @@ export function AssignmentDialog({
   developers,
   projects,
   selectedDeveloper,
+  selectedDate,
   onSuccess,
 }: AssignmentDialogProps) {
   const [formData, setFormData] = useState<CreateAssignment & { developerId: string }>({
@@ -49,11 +51,12 @@ export function AssignmentDialog({
   // Reset form when dialog opens
   useEffect(() => {
     if (open) {
+      const defaultDate = selectedDate || formatDateISO(new Date())
       setFormData({
         developerId: selectedDeveloper?.id || '',
         projectId: projects[0]?.id || '',
-        startDate: formatDateISO(new Date()),
-        endDate: formatDateISO(new Date()),
+        startDate: defaultDate,
+        endDate: defaultDate,
         allocationType: 'hours',
         allocationValue: selectedDeveloper?.defaultCapacity || 8,
         notes: '',
@@ -61,7 +64,7 @@ export function AssignmentDialog({
       })
       setValidationError('')
     }
-  }, [open, selectedDeveloper, projects])
+  }, [open, selectedDeveloper, selectedDate, projects])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

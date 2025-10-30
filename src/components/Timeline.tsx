@@ -1,7 +1,16 @@
 import { useMemo } from 'react'
-import { Plus, Trash2, Umbrella } from 'lucide-react'
+import { Plus, Trash2, Umbrella, GripVertical } from 'lucide-react'
 import { Button } from './ui/button'
 import { Card } from './ui/card'
+import {
+  DndContext,
+  DragEndEvent,
+  useDraggable,
+  useDroppable,
+  DragStartEvent,
+} from '@dnd-kit/core'
+import { CSS } from '@dnd-kit/utilities'
+import { useState } from 'react'
 import {
   getViewDateRange,
   getDaysInRange,
@@ -10,6 +19,7 @@ import {
   formatDateISO,
   format,
   isSameDayCheck,
+  getDaysBetween,
 } from '@/utils/dateUtils'
 import {
   calculateDayAllocation,
@@ -20,6 +30,95 @@ import { getContrastTextColor } from '@/utils/colorUtils'
 import { storageService } from '@/services/storage'
 import type { Developer, Project, Assignment, TimeOff, ViewMode } from '@/types'
 
+// Draggable Assignment Component
+function DraggableAssignment({
+  assignment,
+  project,
+  onDelete,
+  isDragging,
+}: {
+  assignment: Assignment
+  project: Project
+  onDelete: () => void
+  isDragging?: boolean
+}) {
+  const { attributes, listeners, setNodeRef, transform } = useDraggable({
+    id: assignment.id,
+  })
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    backgroundColor: project.color,
+    color: getContrastTextColor(project.color),
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="relative group rounded p-1 text-xs flex items-center justify-between cursor-grab active:cursor-grabbing"
+      title={`${project.name}: ${assignment.allocationValue}${
+        assignment.allocationType === 'percentage' ? '%' : 'h'
+      }`}
+      {...attributes}
+      {...listeners}
+    >
+      <div className="flex items-center gap-1 flex-1 min-w-0">
+        <GripVertical className="h-3 w-3 flex-shrink-0 opacity-50" />
+        <div className="flex flex-col flex-1 min-w-0">
+          <span className="truncate font-medium">{project.code}</span>
+          <span className="text-[10px] opacity-90">
+            {assignment.allocationValue}
+            {assignment.allocationType === 'percentage' ? '%' : 'h'}
+          </span>
+        </div>
+      </div>
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          onDelete()
+        }}
+        className="opacity-0 group-hover:opacity-100 flex-shrink-0 ml-1"
+      >
+        <Trash2 className="h-3 w-3" />
+      </button>
+    </div>
+  )
+}
+
+// Droppable Cell Component
+function DroppableCell({
+  id,
+  children,
+  isEmpty,
+  isToday,
+  onClick,
+}: {
+  id: string
+  children: React.ReactNode
+  isEmpty: boolean
+  isToday: boolean
+  onClick?: () => void
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id })
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex-1 min-w-[120px] p-1 border-r ${
+        isToday ? 'bg-primary/5' : ''
+      } ${isEmpty ? 'cursor-pointer hover:bg-muted/50' : ''} ${
+        isOver ? 'bg-blue-100 ring-2 ring-blue-400' : ''
+      }`}
+      onClick={onClick}
+      title={isEmpty ? 'Click to add assignment' : ''}
+    >
+      {children}
+    </div>
+  )
+}
+
 interface TimelineProps {
   currentDate: Date
   viewMode: ViewMode
@@ -27,7 +126,7 @@ interface TimelineProps {
   projects: Project[]
   assignments: Assignment[]
   timeOffs: TimeOff[]
-  onAddAssignment: (developer: Developer) => void
+  onAddAssignment: (developer: Developer, date?: string) => void
   onAddTimeOff: (developer: Developer) => void
   onDataChange: () => void
 }
@@ -43,6 +142,10 @@ export function Timeline({
   onAddTimeOff,
   onDataChange,
 }: TimelineProps) {
+  // Drag and drop state
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [activeAssignment, setActiveAssignment] = useState<Assignment | null>(null)
+
   // Get date range for current view
   const { start, end } = getViewDateRange(currentDate, viewMode)
 
@@ -108,6 +211,61 @@ export function Timeline({
     }
   }
 
+  // Drag and drop handlers
+  const handleDragStart = (event: DragStartEvent) => {
+    const assignmentId = event.active.id as string
+    const assignment = assignments.find((a) => a.id === assignmentId)
+    setActiveId(assignmentId)
+    setActiveAssignment(assignment || null)
+  }
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { over } = event
+    setActiveId(null)
+    setActiveAssignment(null)
+
+    if (!over || !activeAssignment) return
+
+    // Parse the droppable ID (format: "cell-developerId-date")
+    const dropId = over.id as string
+    if (!dropId.startsWith('cell-')) return
+
+    const [, newDeveloperId, newDateStr] = dropId.split('-')
+
+    if (!newDeveloperId || !newDateStr) return
+
+    // Check if assignment was moved
+    if (
+      activeAssignment.developerId === newDeveloperId &&
+      activeAssignment.startDate === newDateStr
+    ) {
+      return // No change
+    }
+
+    // Calculate duration to maintain it
+    const originalDuration = getDaysBetween(
+      activeAssignment.startDate,
+      activeAssignment.endDate
+    )
+
+    // Calculate new end date
+    const newStartDate = new Date(newDateStr)
+    const newEndDate = new Date(newStartDate)
+    newEndDate.setDate(newEndDate.getDate() + originalDuration - 1)
+
+    try {
+      await storageService.updateAssignment(activeAssignment.id, {
+        developerId: newDeveloperId,
+        startDate: newDateStr,
+        endDate: formatDateISO(newEndDate),
+      })
+      onDataChange()
+    } catch (error) {
+      console.error('Error updating assignment:', error)
+      alert('Failed to move assignment')
+    }
+  }
+
   // Get assignments for a developer on a specific period
   const getAssignmentsForPeriod = (developer: Developer, period: Date) => {
     const periodDateStr = formatDateISO(period)
@@ -125,9 +283,10 @@ export function Timeline({
   }
 
   return (
-    <div className="relative">
-      <Card className="overflow-x-auto">
-        <div className="min-w-max">
+    <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <div className="relative">
+        <Card className="overflow-x-auto">
+          <div className="min-w-max">
           {/* Header Row */}
           <div className="flex border-b bg-muted/50">
             <div className="w-48 flex-shrink-0 p-4 font-semibold border-r">
@@ -169,13 +328,20 @@ export function Timeline({
                   capacity.availableCapacity,
                   capacity.allocationType
                 )
+                const periodDateStr = formatDateISO(period)
+                const isEmpty = !capacity.timeOff && capacity.assignments.length === 0
 
                 return (
-                  <div
+                  <DroppableCell
                     key={index}
-                    className={`flex-1 min-w-[120px] p-1 border-r ${
-                      isToday(period) ? 'bg-primary/5' : ''
-                    }`}
+                    id={`cell-${developer.id}-${periodDateStr}`}
+                    isEmpty={isEmpty}
+                    isToday={isToday(period)}
+                    onClick={() => {
+                      if (isEmpty) {
+                        onAddAssignment(developer, periodDateStr)
+                      }
+                    }}
                   >
                     {/* Time Off */}
                     {capacity.timeOff && (
@@ -204,33 +370,13 @@ export function Timeline({
                           if (!project) return null
 
                           return (
-                            <div
+                            <DraggableAssignment
                               key={assignment.id}
-                              className="relative group rounded p-1 text-xs flex items-center justify-between"
-                              style={{
-                                backgroundColor: project.color,
-                                color: getContrastTextColor(project.color),
-                              }}
-                              title={`${project.name}: ${assignment.allocationValue}${
-                                assignment.allocationType === 'percentage' ? '%' : 'h'
-                              }`}
-                            >
-                              <div className="flex flex-col flex-1 min-w-0">
-                                <span className="truncate font-medium">
-                                  {project.code}
-                                </span>
-                                <span className="text-[10px] opacity-90">
-                                  {assignment.allocationValue}
-                                  {assignment.allocationType === 'percentage' ? '%' : 'h'}
-                                </span>
-                              </div>
-                              <button
-                                onClick={() => handleDeleteAssignment(assignment)}
-                                className="opacity-0 group-hover:opacity-100 flex-shrink-0 ml-1"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </button>
-                            </div>
+                              assignment={assignment}
+                              project={project}
+                              onDelete={() => handleDeleteAssignment(assignment)}
+                              isDragging={activeId === assignment.id}
+                            />
                           )
                         })}
 
@@ -252,7 +398,7 @@ export function Timeline({
                         )}
                       </div>
                     )}
-                  </div>
+                  </DroppableCell>
                 )
               })}
 
@@ -280,5 +426,6 @@ export function Timeline({
         </div>
       </Card>
     </div>
+    </DndContext>
   )
 }
