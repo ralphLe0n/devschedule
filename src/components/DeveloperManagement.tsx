@@ -13,7 +13,6 @@ import {
   DialogTitle,
   DialogClose,
 } from './ui/dialog'
-import { Badge } from './ui/badge'
 import { storageService } from '@/services/storage'
 import type { Developer, CreateDeveloper } from '@/types'
 

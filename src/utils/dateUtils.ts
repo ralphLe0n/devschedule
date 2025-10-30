@@ -24,7 +24,6 @@ import {
   isWithinInterval,
   parseISO,
   isSameDay,
-  differenceInDays,
   differenceInCalendarDays,
 } from 'date-fns';
 
